@@ -23,7 +23,25 @@ namespace relay {
 namespace contrib {
 
 using namespace backend;
+
+
+static tvm::Array<Expr> BindToCallNodeArgs(const vector<Expr>& args, const CallNode* cn) {
+  tvm::Array<Expr> res;
+  for (const auto& arg : args) {
+    if (arg->IsInstance<ConstantNode>()) {
+      res.push_back(arg);
+    } else {
+      auto body_params = cn->op.as<FunctionNode>()->params;
+      auto found = find(body_params.begin(), body_params.end(), arg);
+      ICHECK(found != body_params.end());
+      auto idx = distance(body_params.begin(), found);
+      res.push_back(cn->args[idx]);
+    }
+  }
+  return res;
+}
  // C source runtime
+ 
 inline size_t GetShape1DSize(const Type& type) {
   const auto shape = GetShape(type);
   return std::accumulate(shape.begin(), shape.end(), 1, std::multiplies<int>());
@@ -102,14 +120,21 @@ vector<string> BatchNorm(const CallNode* call) {
   return args;
 }
 
-
-
+vector<string> Add(const CallNode* call) {
+  vector<string> args;
+  auto ishape = GetShape(call->args[0]->checked_type());
+  args.push_back(to_string(0));
+  // Args: H, W
+  args.push_back(GetShapeString(ishape));
+  return args;
+}
+/*
 vector<std::string> Add(const CallNode* call) {
   vector<string> args;
   
   return args;
 }
-
+*/
 vector<string> Multiply(const CallNode* call) {
   vector<string> args;
   
@@ -193,9 +218,10 @@ class CodegenShakti:public CodegenCBase,public MemoizedExprTranslator<vector<Out
       }
       else
       ret=GenerateOpCall(node);
-
+		//LOG(INFO)<<"SHREYA";
       buf_decl_.insert(buf_decl_.end(),ret.buffers.begin(),ret.buffers.end());
       ext_func_body_.push_back(ret.decl);
+      //LOG(INFO)<<"SHREYA";
       return ret.outputs;
 
     }
@@ -215,15 +241,19 @@ class CodegenShakti:public CodegenCBase,public MemoizedExprTranslator<vector<Out
     };
 
     vector<string> GetArgumentNames(const CallNode *node)
-    {
+    {	
+    	//LOG(INFO)<<node->args.size();
       vector<string>ret;
-      for(size_t i=0;node->args.size();i++)
-      {
+      for(size_t i=0;i<node->args.size();i++)
+      {	
+      		//LOG(INFO)<<"123";
         auto res=VisitExpr(node->args[i]);
+       // LOG(INFO)<<"123";
         for(const auto &out:res)
         {
           ret.push_back(out.name);
         }
+       // LOG(INFO)<<"123";
       }
       return ret;
     }
@@ -248,11 +278,12 @@ class CodegenShakti:public CodegenCBase,public MemoizedExprTranslator<vector<Out
       const auto iter=op_map.find(op_name);
       if(iter!=op_map.end())
       { 
+      	//LOG(INFO)<<"SHREYA";
         //if found call generate body by passing call node , fucntion naem and
         return GenerateBody(node,iter->second.first,iter->second.second(node));
       }
       LOG(FATAL)<<"unsupported op by shakti"<< AsText(node->op,false);
-      return {};
+      //return {};
 
 
 
@@ -264,6 +295,7 @@ class CodegenShakti:public CodegenCBase,public MemoizedExprTranslator<vector<Out
 
     GenerateBodyOutput GenerateBody(const CallNode* root_call, const string& func_name,
                                   const vector<string>& attribute_args) {
+                                  //LOG(INFO)<<"SHREYA";
     return GenerateBody(root_call, func_name, GetArgumentNames(root_call), attribute_args);
   }
 
@@ -271,6 +303,7 @@ class CodegenShakti:public CodegenCBase,public MemoizedExprTranslator<vector<Out
                                   const vector<string>& func_args,
                                   const vector<string>& attribute_args) {
     // Make function call with input buffers when visiting arguments
+   // LOG(INFO)<<"SHREYA";
     ICHECK_GT(func_args.size(), 0);
     ostringstream decl_stream;
     decl_stream << "(" << func_args[0];
@@ -307,6 +340,7 @@ class CodegenShakti:public CodegenCBase,public MemoizedExprTranslator<vector<Out
       output.need_copy = true;
       ret.buffers.push_back("float* " + out + " = (float*)std::malloc(4 * " +
                             to_string(out_size) + ");");
+                           // LOG(INFO)<<"SHREYA";
       ret.outputs.push_back(output);
     }
 
@@ -353,9 +387,11 @@ class ShaktiModuleCodegen: public CSourceModuleCodegenBase{
       auto sid=GetExtSymbol(func);
 
       CodegenShakti builder(sid);
+     // LOG(INFO)<<"SHREYA";
       auto out=builder.VisitExpr(func->body);
+      //LOG(INFO)<<"SHREYA";
       code_stream_<<builder.JIT(out);
-
+	//LOG(INFO)<<"SHREYA";
       return {sid,builder.const_vars_};
 
     }
@@ -388,13 +424,14 @@ class ShaktiModuleCodegen: public CSourceModuleCodegenBase{
             string code=code_stream_.str();
             String sym=get<0>(res);
             Array<String> variables=get<1>(res);
-
+		//LOG(INFO)<<"SHREYA";
             //create a Csource module
 
             //the fucntions returns PackedFunction pointer to register function and nullptr if not exist
             const auto *pf=runtime::Registry::Get("runtime.CSourceModuleCreate");
+            //LOG(INFO)<<"SHREYA";
             CHECK(pf!=nullptr)<<"No csource module to create external runtime module";
-            return (*pf)(code,"c",sym,variables);
+            return (*pf)(code,"c",Array<String>{sym},variables);
 
 
 
